@@ -23,15 +23,15 @@ const Share = makeIcon("↗");
    ============================================================ */
 
 const C = {
-  ink: "#10203F",
-  ink2: "#1F3864",
-  paper: "#F1EEE4",
+  ink: "#0B2144",
+  ink2: "#174A7E",
+  paper: "#FFF8E8",
   card: "#FFFFFF",
-  olive: "#5B6B2E",
-  tomato: "#C8442B",
-  amber: "#E8A33D",
-  line: "#D8D2C4",
-  mute: "#8A8477",
+  olive: "#2E9B50",
+  tomato: "#E54835",
+  amber: "#FFB326",
+  line: "#E7D6AE",
+  mute: "#6F7480",
 };
 
 const FONT_AR = "'Noto Kufi Arabic','Tajawal','Segoe UI',system-ui,sans-serif";
@@ -39,6 +39,28 @@ const FONT_ZH = "'PingFang SC','Microsoft YaHei',system-ui,sans-serif";
 const FONT_NUM = "'DIN Alternate','Roboto Mono',ui-monospace,monospace";
 
 const STORE = "jc_food_voucher_v3";
+const TRANSLATION_API = "https://api.mymemory.translated.net/get";
+
+const hasArabic = (value) => /[\u0600-\u06ff]/.test(value);
+const hasChinese = (value) => /[\u3400-\u9fff]/.test(value);
+
+const decodeEntities = (value) => {
+  const document = new DOMParser().parseFromString(value, "text/html");
+  return document.documentElement.textContent?.trim() || value.trim();
+};
+
+async function translateWithMyMemory(text, source, target) {
+  const query = new URLSearchParams({ q: text, langpair: `${source}|${target}`, mt: "1" });
+  const response = await fetch(`${TRANSLATION_API}?${query.toString()}`, {
+    headers: { Accept: "application/json" },
+  });
+  const payload = await response.json();
+  const translated = payload?.responseData?.translatedText;
+  if (!response.ok || Number(payload?.responseStatus) !== 200 || !translated) {
+    throw new Error(payload?.responseDetails || "Translation failed");
+  }
+  return decodeEntities(translated);
+}
 
 /* ---- 界面文案 ---- */
 const TX = {
@@ -58,9 +80,11 @@ const TX = {
   typeName: { ar: "اكتب الاسم بالعربي", zh: "用中文或阿拉伯语写品名" },
   eg: { ar: "مثال: ملوخية", zh: "例如：秋葵 / ملوخية" },
   translate: { ar: "ترجمة", zh: "翻译" },
+  apiNote: { ar: "ترجمة تلقائية عبر MyMemory — يرجى مراجعة الاسم قبل الحفظ", zh: "由 MyMemory 自动翻译，保存前请核对名称" },
+  apiReview: { ar: "تمت الترجمة تلقائياً؛ يرجى مراجعة الاسمين", zh: "已自动翻译，请核对中阿文名称" },
   saveUse: { ar: "حفظ واستخدام", zh: "保存并使用" },
   notFound: { ar: "غير معروف، جرّب اسماً آخر", zh: "无法识别，请换个说法" },
-  netErr: { ar: "فشل الاتصال", zh: "翻译服务连接失败" },
+  netErr: { ar: "تعذر الاتصال؛ أكمل الاسمين يدوياً", zh: "翻译服务暂时不可用，请手动补充名称" },
   print: { ar: "طباعة", zh: "打印" },
   sharePdf: { ar: "مشاركة PDF", zh: "分享 PDF" },
   creatingPdf: { ar: "جارٍ إنشاء PDF…", zh: "正在生成 PDF…" },
@@ -119,10 +143,10 @@ const PRESET = [
 ];
 
 const GROUPS = [
-  { id: "veg", ar: "خضار", zh: "蔬菜", e: "🥬" },
-  { id: "fruit", ar: "فواكه", zh: "水果", e: "🍎" },
-  { id: "meat", ar: "لحوم", zh: "肉蛋", e: "🍗" },
-  { id: "dry", ar: "مواد جافة", zh: "干货", e: "🍚" },
+  { id: "veg", ar: "خضار", zh: "蔬菜", e: "🥬", c: "#2E9B50", bg: "#EAF9EF" },
+  { id: "fruit", ar: "فواكه", zh: "水果", e: "🍎", c: "#E23E6B", bg: "#FFF0F4" },
+  { id: "meat", ar: "لحوم", zh: "肉蛋", e: "🍗", c: "#E17618", bg: "#FFF2E5" },
+  { id: "dry", ar: "مواد جافة", zh: "干货", e: "🍚", c: "#7B4BC4", bg: "#F5EFFF" },
 ];
 
 const DEFAULT_DATA = { custom: [], vouchers: [], prices: {} };
@@ -248,7 +272,7 @@ function Home({ ar, t, data, onNew, onOpen, switchLang }) {
         <LangToggle ar={ar} switchLang={switchLang} />
       </div>
 
-      <button onClick={onNew} className="tap w-full rounded-3xl p-8 mb-6 flex items-center justify-between shadow-sm" style={{ background: C.ink, color: "#fff" }}>
+      <button onClick={onNew} className="tap w-full rounded-3xl p-8 mb-6 flex items-center justify-between shadow-sm" style={{ background: `linear-gradient(135deg, ${C.ink} 0%, ${C.ink2} 100%)`, color: "#fff", boxShadow: "0 14px 32px rgba(23,74,126,.22)" }}>
         <span className="text-2xl font-bold">{t("newBuy")}</span>
         <span className="rounded-full p-4" style={{ background: C.amber }}>
           <Plus size={28} color={C.ink} strokeWidth={3} />
@@ -298,6 +322,7 @@ function Buy({ lang, ar, t, draft, setDraft, catalog, prices, data, save, onBack
 
   const total = draft.lines.reduce((s, l) => s + l.qty * l.price, 0);
   const itemById = (id) => catalog.find((c) => c.id === id);
+  const activeGroup = GROUPS.find((g) => g.id === group);
   const nameOf = (o) => (ar ? o.ar : o.zh);
   const subOf = (o) => (ar ? o.zh : o.ar);
 
@@ -346,7 +371,7 @@ function Buy({ lang, ar, t, draft, setDraft, catalog, prices, data, save, onBack
             key={g.id}
             onClick={() => setGroup(g.id)}
             className="tap rounded-full px-4 py-2 whitespace-nowrap font-bold"
-            style={{ background: group === g.id ? C.ink : C.card, color: group === g.id ? "#fff" : C.ink, border: `1px solid ${group === g.id ? C.ink : C.line}` }}
+            style={{ background: group === g.id ? g.c : g.bg, color: group === g.id ? "#fff" : C.ink, border: `1px solid ${g.c}`, boxShadow: group === g.id ? `0 6px 16px ${g.c}33` : "none" }}
           >
             <span style={{ marginInlineEnd: 4 }}>{g.e}</span>
             {nameOf(g)}
@@ -356,7 +381,7 @@ function Buy({ lang, ar, t, draft, setDraft, catalog, prices, data, save, onBack
 
       <div className="grid grid-cols-3 gap-3 px-4">
         {catalog.filter((c) => (c.g || "veg") === group).map((it) => (
-          <button key={it.id} onClick={() => setPicking(it)} className="tap rounded-2xl py-4 flex flex-col items-center gap-1" style={{ background: C.card, border: `1px solid ${C.line}` }}>
+          <button key={it.id} onClick={() => setPicking(it)} className="tap rounded-2xl py-4 flex flex-col items-center gap-1" style={{ background: activeGroup?.bg || C.card, border: `1px solid ${activeGroup?.c || C.line}` }}>
             <span className="text-4xl">{it.e}</span>
             <span className="font-bold text-sm leading-tight text-center px-1">{nameOf(it)}</span>
             <span className="text-xs leading-tight text-center px-1" style={{ color: C.mute, fontFamily: ar ? FONT_ZH : FONT_AR }}>{subOf(it)}</span>
@@ -368,7 +393,7 @@ function Buy({ lang, ar, t, draft, setDraft, catalog, prices, data, save, onBack
         </button>
       </div>
 
-      <div className="no-print fixed bottom-0 left-0 right-0 px-4 py-3" style={{ background: C.ink }}>
+      <div className="no-print fixed bottom-0 left-0 right-0 px-4 py-3" style={{ background: `linear-gradient(135deg, ${C.ink} 0%, ${C.ink2} 100%)`, boxShadow: "0 -10px 28px rgba(11,33,68,.18)" }}>
         <div className="max-w-md mx-auto flex items-center gap-3">
           <div className="flex-1">
             <div className="text-xs" style={{ color: "rgba(255,255,255,.6)" }}>{t("total")}</div>
@@ -506,25 +531,52 @@ function AddItem({ ar, t, group, data, save, onClose, onAdded }) {
     if (!text.trim()) return;
     setBusy(true);
     setErr("");
-    await new Promise((resolve) => setTimeout(resolve, 220));
-    const query = text.trim().toLocaleLowerCase();
-    const matched = PRESET.find((item) =>
-      [item.ar, item.zh, item.en].some((name) => name.toLocaleLowerCase() === query),
-    );
+    const input = text.trim();
+    const query = input.toLocaleLowerCase();
+    const matched = PRESET.find((item) => [item.ar, item.zh, item.en].some((name) => name.toLocaleLowerCase() === query));
 
-    if (matched) {
-      setRes({ ...matched, manual: false });
-    } else {
-      const inputIsArabic = /[\u0600-\u06ff]/.test(text);
+    try {
+      if (matched) {
+        setRes({ ...matched, manual: false, api: false });
+      } else {
+        const inputIsArabic = hasArabic(input);
+        const source = inputIsArabic ? "ar" : "zh-CN";
+        const target = inputIsArabic ? "zh-CN" : "ar";
+        const [direct, english] = await Promise.all([
+          translateWithMyMemory(input, source, target),
+          translateWithMyMemory(input, source, "en"),
+        ]);
+
+        let translated = direct;
+        if ((inputIsArabic && !hasChinese(direct)) || (!inputIsArabic && !hasArabic(direct))) {
+          translated = await translateWithMyMemory(english, "en", target);
+        }
+
+        const category = GROUPS.find((item) => item.id === group);
+        setRes({
+          ar: inputIsArabic ? input : translated,
+          zh: inputIsArabic ? translated : input,
+          en: english,
+          e: category?.e || "🥗",
+          u: "kg",
+          g: group,
+          manual: true,
+          api: true,
+        });
+      }
+    } catch (error) {
+      const inputIsArabic = hasArabic(input);
       const category = GROUPS.find((item) => item.id === group);
+      setErr(t("netErr"));
       setRes({
-        ar: inputIsArabic ? text.trim() : "",
-        zh: inputIsArabic ? "" : text.trim(),
-        en: text.trim(),
+        ar: inputIsArabic ? input : "",
+        zh: inputIsArabic ? "" : input,
+        en: input,
         e: category?.e || "🥗",
         u: "kg",
         g: group,
         manual: true,
+        api: false,
       });
     }
     setBusy(false);
@@ -557,9 +609,12 @@ function AddItem({ ar, t, group, data, save, onClose, onAdded }) {
         />
 
         {!res && (
-          <button onClick={translate} disabled={busy || !text.trim()} className="tap w-full rounded-2xl py-4 font-bold text-lg flex items-center justify-center gap-2" style={{ background: text.trim() ? C.ink : "#DDD9CF", color: text.trim() ? "#fff" : C.mute }}>
-            {busy ? <Loader2 size={20} className="animate-spin" /> : <Languages size={20} />} {t("translate")}
-          </button>
+          <div>
+            <button onClick={translate} disabled={busy || !text.trim()} className="tap w-full rounded-2xl py-4 font-bold text-lg flex items-center justify-center gap-2" style={{ background: text.trim() ? `linear-gradient(135deg, ${C.ink} 0%, ${C.ink2} 100%)` : "#DDD9CF", color: text.trim() ? "#fff" : C.mute }}>
+              {busy ? <Loader2 size={20} className="animate-spin" /> : <Languages size={20} />} {t("translate")}
+            </button>
+            <div className="text-xs text-center mt-2" style={{ color: C.mute }}>{t("apiNote")}</div>
+          </div>
         )}
 
         {err && <div className="mt-3 text-center font-bold" style={{ color: C.tomato }}>{err}</div>}
@@ -571,7 +626,7 @@ function AddItem({ ar, t, group, data, save, onClose, onAdded }) {
               <div className="flex-1 min-w-0">
                 {res.manual && (
                   <div className="text-xs mb-2" style={{ color: C.mute }}>
-                    {ar ? "أكمل الاسم بالعربية والصينية" : "未匹配到内置词库，请补充中阿文名称"}
+                    {res.api ? t("apiReview") : (ar ? "أكمل الاسم بالعربية والصينية" : "未匹配到内置词库，请补充中阿文名称")}
                   </div>
                 )}
                 <input

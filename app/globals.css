@@ -1,9 +1,9 @@
 @import 'tailwindcss';
 
 :root {
-  --ink: #10203f;
-  --paper: #f1eee4;
-  --amber: #e8a33d;
+  --ink: #0b2144;
+  --paper: #fff8e8;
+  --amber: #ffb326;
 }
 
 * { box-sizing: border-box; }
@@ -17,7 +17,8 @@ body {
   min-height: 100vh;
   margin: 0;
   background:
-    radial-gradient(circle at 10% -5%, rgba(232, 163, 61, .14), transparent 28rem),
+    radial-gradient(circle at 8% -5%, rgba(255, 179, 38, .24), transparent 28rem),
+    radial-gradient(circle at 92% 12%, rgba(46, 155, 80, .12), transparent 24rem),
     var(--paper);
   color: var(--ink);
   overscroll-behavior-y: none;
