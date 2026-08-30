@@ -14,6 +14,7 @@ const ArrowRight = makeIcon("→");
 const ArrowLeft = makeIcon("←");
 const Languages = makeIcon("文");
 const Loader2 = makeIcon("◌");
+const Share = makeIcon("↗");
 
 /* ============================================================
    JIN CHENG GLOBAL CERAMIC — 采购食物清单 / سند شراء المواد الغذائية
@@ -61,6 +62,16 @@ const TX = {
   notFound: { ar: "غير معروف، جرّب اسماً آخر", zh: "无法识别，请换个说法" },
   netErr: { ar: "فشل الاتصال", zh: "翻译服务连接失败" },
   print: { ar: "طباعة", zh: "打印" },
+  sharePdf: { ar: "مشاركة PDF", zh: "分享 PDF" },
+  creatingPdf: { ar: "جارٍ إنشاء PDF…", zh: "正在生成 PDF…" },
+  pdfReady: { ar: "ملف PDF جاهز", zh: "PDF 已生成" },
+  shareFile: { ar: "مشاركة الملف", zh: "分享到微信/其他应用" },
+  openPdf: { ar: "فتح PDF", zh: "打开 PDF 预览" },
+  downloadPdf: { ar: "تنزيل PDF", zh: "下载 PDF" },
+  close: { ar: "إغلاق", zh: "关闭" },
+  shareFailed: { ar: "تعذر إنشاء ملف PDF، حاول مرة أخرى", zh: "PDF 生成失败，请重试" },
+  shareFallback: { ar: "إذا لم يظهر خيار المشاركة، افتح الملف أو نزّله أولاً.", zh: "如果系统没有显示文件分享，请先打开或下载 PDF。" },
+  wechatHelp: { ar: "في WeChat: افتح ملف PDF ثم استخدم قائمة ⋯ لإرساله.", zh: "微信内请先打开 PDF，再使用右上角“…”发送给朋友或文件传输助手。" },
 };
 
 const UNITS = [
@@ -597,10 +608,135 @@ function AddItem({ ar, t, group, data, save, onClose, onAdded }) {
   );
 }
 
-/* ---------------- 单据（打印用，固定中英阿三语） ---------------- */
+/* ---------------- 单据（打印 / PDF，固定中英阿三语） ---------------- */
+async function createVoucherPdf(element) {
+  const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+    import("html2canvas"),
+    import("jspdf"),
+  ]);
+
+  if (document.fonts?.ready) await document.fonts.ready;
+
+  const clone = element.cloneNode(true);
+  clone.removeAttribute("id");
+  Object.assign(clone.style, {
+    position: "fixed",
+    left: "-10000px",
+    top: "0",
+    width: "760px",
+    maxWidth: "760px",
+    margin: "0",
+    zIndex: "-1",
+    pointerEvents: "none",
+    background: "#ffffff",
+  });
+  document.body.appendChild(clone);
+
+  try {
+    const canvas = await html2canvas(clone, {
+      backgroundColor: "#ffffff",
+      scale: 1.5,
+      useCORS: true,
+      logging: false,
+      windowWidth: 760,
+    });
+
+    const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4", compress: true });
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const margin = 8;
+    const contentWidth = pageWidth - margin * 2;
+    const contentHeight = pageHeight - margin * 2;
+    const pixelsPerMm = canvas.width / contentWidth;
+    const sliceHeight = Math.max(1, Math.floor(contentHeight * pixelsPerMm));
+
+    for (let offset = 0, page = 0; offset < canvas.height; offset += sliceHeight, page += 1) {
+      const currentHeight = Math.min(sliceHeight, canvas.height - offset);
+      const pageCanvas = document.createElement("canvas");
+      pageCanvas.width = canvas.width;
+      pageCanvas.height = currentHeight;
+      const context = pageCanvas.getContext("2d");
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+      context.drawImage(canvas, 0, offset, canvas.width, currentHeight, 0, 0, canvas.width, currentHeight);
+
+      if (page > 0) pdf.addPage();
+      const imageHeight = currentHeight / pixelsPerMm;
+      pdf.addImage(pageCanvas.toDataURL("image/jpeg", 0.93), "JPEG", margin, margin, contentWidth, imageHeight, undefined, "FAST");
+    }
+
+    return pdf.output("blob");
+  } finally {
+    clone.remove();
+  }
+}
+
 function VoucherView({ ar, t, v, catalog, onBack }) {
   const itemById = (id) => catalog.find((c) => c.id === id) || { ar: "?", zh: "?", u: "kg" };
   const rows = v.lines.map((l) => ({ ...itemById(l.itemId), qty: l.qty, price: l.price, unit: l.unit || itemById(l.itemId).u }));
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [pdfState, setPdfState] = useState(null);
+  const [pdfError, setPdfError] = useState("");
+
+  useEffect(() => {
+    return () => {
+      if (pdfState?.url) URL.revokeObjectURL(pdfState.url);
+    };
+  }, [pdfState]);
+
+  const preparePdf = async () => {
+    const element = document.getElementById("voucher-document");
+    if (!element || pdfBusy) return;
+    setPdfBusy(true);
+    setPdfError("");
+    try {
+      const blob = await createVoucherPdf(element);
+      const filename = `${v.no}-food-purchase.pdf`;
+      const file = new File([blob], filename, { type: "application/pdf" });
+      setPdfState({ file, filename, url: URL.createObjectURL(blob) });
+    } catch (error) {
+      console.error(error);
+      setPdfError(t("shareFailed"));
+    } finally {
+      setPdfBusy(false);
+    }
+  };
+
+  const canShareFile = (() => {
+    if (!pdfState || typeof navigator === "undefined" || !navigator.canShare || !navigator.share) return false;
+    try {
+      return navigator.canShare({ files: [pdfState.file] });
+    } catch {
+      return false;
+    }
+  })();
+
+  const isWechat = typeof navigator !== "undefined" && /MicroMessenger/i.test(navigator.userAgent);
+
+  const sharePreparedPdf = async () => {
+    if (!pdfState || !canShareFile) return;
+    setPdfError("");
+    try {
+      await navigator.share({
+        files: [pdfState.file],
+        title: v.no,
+        text: ar ? "سند شراء المواد الغذائية" : "采购食物清单",
+      });
+    } catch (error) {
+      if (error?.name !== "AbortError") setPdfError(t("shareFallback"));
+    }
+  };
+
+  const openPreparedPdf = () => {
+    if (!pdfState) return;
+    const opened = window.open(pdfState.url, "_blank", "noopener,noreferrer");
+    if (!opened) window.location.assign(pdfState.url);
+  };
+
+  const closePdfPanel = () => {
+    setPdfState(null);
+    setPdfError("");
+  };
 
   return (
     <div>
@@ -608,13 +744,30 @@ function VoucherView({ ar, t, v, catalog, onBack }) {
         <button onClick={onBack} className="tap p-2 rounded-xl" style={{ background: "rgba(255,255,255,.12)" }}>
           {ar ? <ArrowRight size={22} color="#fff" /> : <ArrowLeft size={22} color="#fff" />}
         </button>
-        <span className="font-bold" style={{ color: "#fff", fontFamily: FONT_NUM }}>{v.no}</span>
-        <button onClick={() => window.print()} className="tap rounded-xl px-4 py-2 font-bold flex items-center gap-2" style={{ background: C.amber, color: C.ink }}>
-          <Printer size={18} /> {t("print")}
-        </button>
+        <span className="font-bold text-sm" style={{ color: "#fff", fontFamily: FONT_NUM }}>{v.no}</span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={preparePdf}
+            disabled={pdfBusy}
+            className="tap rounded-xl px-3 py-2 font-bold flex items-center gap-2"
+            style={{ background: C.amber, color: C.ink, opacity: pdfBusy ? 0.72 : 1 }}
+          >
+            {pdfBusy ? <Loader2 size={18} className="animate-spin" /> : <Share size={18} />}
+            <span className="text-sm">{pdfBusy ? t("creatingPdf") : t("sharePdf")}</span>
+          </button>
+          <button
+            onClick={() => window.print()}
+            className="tap rounded-xl p-2"
+            style={{ background: "rgba(255,255,255,.12)" }}
+            aria-label={t("print")}
+            title={t("print")}
+          >
+            <Printer size={20} color="#fff" />
+          </button>
+        </div>
       </div>
 
-      <div dir="ltr" className="mx-auto bg-white p-6" style={{ maxWidth: 760, fontFamily: "system-ui, sans-serif", color: "#000" }}>
+      <div id="voucher-document" dir="ltr" className="mx-auto bg-white p-6" style={{ maxWidth: 760, fontFamily: "system-ui, sans-serif", color: "#000" }}>
         <div className="text-center">
           <div className="text-2xl font-bold" style={{ color: C.ink2 }}>JIN CHENG GLOBAL CERAMIC CO. LTD.</div>
           <div className="text-xs mt-1" style={{ color: "#666" }}>约旦金城环球陶瓷有限公司 | شركة جين تشنغ جلوبال للسيراميك</div>
@@ -690,6 +843,48 @@ function VoucherView({ ar, t, v, catalog, onBack }) {
           本单据为内部记账凭证，非 JoFotara 正式发票，销项/进项税不得据此抵扣。
         </div>
       </div>
+
+      {(pdfState || pdfError) && (
+        <div className="no-print fixed inset-0 z-50 flex items-end justify-center p-4" style={{ background: "rgba(16,32,63,.62)" }}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("pdfReady")}
+            className="w-full max-w-md rounded-3xl p-5 shadow-2xl"
+            style={{ background: C.paper }}
+          >
+            <div className="flex items-center justify-between gap-4 mb-3">
+              <div>
+                <div className="font-bold text-xl">{pdfState ? t("pdfReady") : t("shareFailed")}</div>
+                {pdfState && <div className="text-xs mt-1" dir="ltr" style={{ color: C.mute, fontFamily: FONT_NUM }}>{pdfState.filename}</div>}
+              </div>
+              <button onClick={closePdfPanel} className="tap p-3 rounded-2xl" style={{ background: C.card }} aria-label={t("close")}>
+                <X size={22} color={C.ink} />
+              </button>
+            </div>
+
+            <p className="text-sm leading-6 mb-4" style={{ color: pdfError ? C.tomato : C.mute }}>
+              {pdfError || (isWechat ? t("wechatHelp") : t("shareFallback"))}
+            </p>
+
+            {pdfState && (
+              <div className="grid gap-2">
+                {canShareFile && (
+                  <button onClick={sharePreparedPdf} className="tap w-full rounded-2xl py-4 px-4 font-bold text-lg" style={{ background: C.olive, color: "#fff" }}>
+                    {t("shareFile")}
+                  </button>
+                )}
+                <button onClick={openPreparedPdf} className="tap w-full rounded-2xl py-4 px-4 font-bold" style={{ background: C.ink, color: "#fff" }}>
+                  {t("openPdf")}
+                </button>
+                <a href={pdfState.url} download={pdfState.filename} className="tap w-full rounded-2xl py-3 px-4 font-bold text-center" style={{ background: C.card, color: C.ink, border: `1px solid ${C.line}` }}>
+                  {t("downloadPdf")}
+                </a>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
