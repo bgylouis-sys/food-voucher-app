@@ -87,7 +87,9 @@ const TX = {
   netErr: { ar: "تعذر الاتصال؛ أكمل الاسمين يدوياً", zh: "翻译服务暂时不可用，请手动补充名称" },
   print: { ar: "طباعة", zh: "打印" },
   sharePdf: { ar: "مشاركة PDF", zh: "分享 PDF" },
+  openPdfNow: { ar: "إنشاء وفتح PDF", zh: "生成并打开 PDF" },
   creatingPdf: { ar: "جارٍ إنشاء PDF…", zh: "正在生成 PDF…" },
+  openingPdf: { ar: "جارٍ فتح PDF…", zh: "正在打开 PDF…" },
   pdfReady: { ar: "ملف PDF جاهز", zh: "PDF 已生成" },
   shareFile: { ar: "مشاركة الملف", zh: "分享到微信/其他应用" },
   openPdf: { ar: "فتح PDF", zh: "打开 PDF 预览" },
@@ -95,7 +97,7 @@ const TX = {
   close: { ar: "إغلاق", zh: "关闭" },
   shareFailed: { ar: "تعذر إنشاء ملف PDF، حاول مرة أخرى", zh: "PDF 生成失败，请重试" },
   shareFallback: { ar: "إذا لم يظهر خيار المشاركة، افتح الملف أو نزّله أولاً.", zh: "如果系统没有显示文件分享，请先打开或下载 PDF。" },
-  wechatHelp: { ar: "في WeChat: افتح ملف PDF ثم استخدم قائمة ⋯ لإرساله.", zh: "微信内请先打开 PDF，再使用右上角“…”发送给朋友或文件传输助手。" },
+  wechatHelp: { ar: "سيُفتح PDF تلقائياً في WeChat. إذا لم يظهر، استخدم زر فتح PDF أدناه، ثم قائمة ⋯ للإرسال.", zh: "PDF 会自动在微信中打开；如果没有出现，请点击下方“打开 PDF 预览”，再使用右上角“…”发送。" },
 };
 
 const UNITS = [
@@ -732,6 +734,7 @@ function VoucherView({ ar, t, v, catalog, onBack }) {
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pdfState, setPdfState] = useState(null);
   const [pdfError, setPdfError] = useState("");
+  const isWechat = typeof navigator !== "undefined" && /MicroMessenger/i.test(navigator.userAgent);
 
   useEffect(() => {
     return () => {
@@ -742,14 +745,52 @@ function VoucherView({ ar, t, v, catalog, onBack }) {
   const preparePdf = async () => {
     const element = document.getElementById("voucher-document");
     if (!element || pdfBusy) return;
+
+    let previewWindow = null;
+    if (isWechat) {
+      try {
+        previewWindow = window.open("", "_blank");
+        if (previewWindow) {
+          previewWindow.opener = null;
+          previewWindow.document.title = t("creatingPdf");
+          previewWindow.document.body.textContent = t("creatingPdf");
+          Object.assign(previewWindow.document.body.style, {
+            margin: "0",
+            minHeight: "100vh",
+            display: "grid",
+            placeItems: "center",
+            padding: "24px",
+            boxSizing: "border-box",
+            background: C.paper,
+            color: C.ink,
+            fontFamily: ar ? FONT_AR : FONT_ZH,
+            fontWeight: "700",
+            textAlign: "center",
+          });
+        }
+      } catch {
+        previewWindow = null;
+      }
+    }
+
     setPdfBusy(true);
     setPdfError("");
     try {
       const blob = await createVoucherPdf(element);
       const filename = `${v.no}-food-purchase.pdf`;
       const file = new File([blob], filename, { type: "application/pdf" });
-      setPdfState({ file, filename, url: URL.createObjectURL(blob) });
+      const nextPdfState = { file, filename, url: URL.createObjectURL(blob) };
+      setPdfState(nextPdfState);
+
+      if (isWechat) {
+        if (previewWindow && !previewWindow.closed) {
+          previewWindow.location.replace(nextPdfState.url);
+        } else {
+          window.location.assign(nextPdfState.url);
+        }
+      }
     } catch (error) {
+      if (previewWindow && !previewWindow.closed) previewWindow.close();
       console.error(error);
       setPdfError(t("shareFailed"));
     } finally {
@@ -765,8 +806,6 @@ function VoucherView({ ar, t, v, catalog, onBack }) {
       return false;
     }
   })();
-
-  const isWechat = typeof navigator !== "undefined" && /MicroMessenger/i.test(navigator.userAgent);
 
   const sharePreparedPdf = async () => {
     if (!pdfState || !canShareFile) return;
@@ -808,7 +847,9 @@ function VoucherView({ ar, t, v, catalog, onBack }) {
             style={{ background: C.amber, color: C.ink, opacity: pdfBusy ? 0.72 : 1 }}
           >
             {pdfBusy ? <Loader2 size={18} className="animate-spin" /> : <Share size={18} />}
-            <span className="text-sm">{pdfBusy ? t("creatingPdf") : t("sharePdf")}</span>
+            <span className="text-sm">
+              {pdfBusy ? (isWechat ? t("openingPdf") : t("creatingPdf")) : (isWechat ? t("openPdfNow") : t("sharePdf"))}
+            </span>
           </button>
           <button
             onClick={() => window.print()}
@@ -886,7 +927,7 @@ function VoucherView({ ar, t, v, catalog, onBack }) {
 
         <div className="flex mt-6" style={{ border: "1px solid #999" }}>
           <div className="flex-1 p-3" style={{ borderRight: "1px solid #999" }}>
-            <div className="text-sm font-bold">采购人签字 Purchaser's Signature / توقيع المشتري</div>
+            <div className="text-sm font-bold">采购人签字 Purchaser&apos;s Signature / توقيع المشتري</div>
             <div style={{ height: 60 }} />
           </div>
           <div style={{ width: "35%" }} className="p-3">
