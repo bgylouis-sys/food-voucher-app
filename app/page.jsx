@@ -87,17 +87,17 @@ const TX = {
   netErr: { ar: "تعذر الاتصال؛ أكمل الاسمين يدوياً", zh: "翻译服务暂时不可用，请手动补充名称" },
   print: { ar: "طباعة", zh: "打印" },
   sharePdf: { ar: "مشاركة PDF", zh: "分享 PDF" },
-  openPdfNow: { ar: "إنشاء وفتح PDF", zh: "生成并打开 PDF" },
+  preparePdf: { ar: "إنشاء PDF", zh: "生成 PDF" },
   creatingPdf: { ar: "جارٍ إنشاء PDF…", zh: "正在生成 PDF…" },
-  openingPdf: { ar: "جارٍ فتح PDF…", zh: "正在打开 PDF…" },
   pdfReady: { ar: "ملف PDF جاهز", zh: "PDF 已生成" },
+  pdfPreview: { ar: "معاينة محتوى PDF", zh: "PDF 内容预览" },
   shareFile: { ar: "مشاركة الملف", zh: "分享到微信/其他应用" },
   openPdf: { ar: "فتح PDF", zh: "打开 PDF 预览" },
   downloadPdf: { ar: "تنزيل PDF", zh: "下载 PDF" },
   close: { ar: "إغلاق", zh: "关闭" },
   shareFailed: { ar: "تعذر إنشاء ملف PDF، حاول مرة أخرى", zh: "PDF 生成失败，请重试" },
   shareFallback: { ar: "إذا لم يظهر خيار المشاركة، افتح الملف أو نزّله أولاً.", zh: "如果系统没有显示文件分享，请先打开或下载 PDF。" },
-  wechatHelp: { ar: "سيُفتح PDF تلقائياً في WeChat. إذا لم يظهر، استخدم زر فتح PDF أدناه، ثم قائمة ⋯ للإرسال.", zh: "PDF 会自动在微信中打开；如果没有出现，请点击下方“打开 PDF 预览”，再使用右上角“…”发送。" },
+  wechatHelp: { ar: "لا يدعم WeChat فتح ملف PDF الذي ينشئه الموقع مباشرة. راجع المعاينة أدناه ثم نزّل الملف؛ وبعد التنزيل افتحه أو أرسله من مدير الملفات.", zh: "微信不支持直接打开网页生成的 PDF。请先查看下方预览，再下载 PDF；下载完成后可从文件管理中打开或发送。" },
 };
 
 const UNITS = [
@@ -707,6 +707,8 @@ async function createVoucherPdf(element) {
     const pixelsPerMm = canvas.width / contentWidth;
     const sliceHeight = Math.max(1, Math.floor(contentHeight * pixelsPerMm));
 
+    const previewImages = [];
+
     for (let offset = 0, page = 0; offset < canvas.height; offset += sliceHeight, page += 1) {
       const currentHeight = Math.min(sliceHeight, canvas.height - offset);
       const pageCanvas = document.createElement("canvas");
@@ -719,10 +721,12 @@ async function createVoucherPdf(element) {
 
       if (page > 0) pdf.addPage();
       const imageHeight = currentHeight / pixelsPerMm;
-      pdf.addImage(pageCanvas.toDataURL("image/jpeg", 0.93), "JPEG", margin, margin, contentWidth, imageHeight, undefined, "FAST");
+      const pageImage = pageCanvas.toDataURL("image/jpeg", 0.93);
+      previewImages.push(pageImage);
+      pdf.addImage(pageImage, "JPEG", margin, margin, contentWidth, imageHeight, undefined, "FAST");
     }
 
-    return pdf.output("blob");
+    return { blob: pdf.output("blob"), previewImages };
   } finally {
     clone.remove();
   }
@@ -746,51 +750,15 @@ function VoucherView({ ar, t, v, catalog, onBack }) {
     const element = document.getElementById("voucher-document");
     if (!element || pdfBusy) return;
 
-    let previewWindow = null;
-    if (isWechat) {
-      try {
-        previewWindow = window.open("", "_blank");
-        if (previewWindow) {
-          previewWindow.opener = null;
-          previewWindow.document.title = t("creatingPdf");
-          previewWindow.document.body.textContent = t("creatingPdf");
-          Object.assign(previewWindow.document.body.style, {
-            margin: "0",
-            minHeight: "100vh",
-            display: "grid",
-            placeItems: "center",
-            padding: "24px",
-            boxSizing: "border-box",
-            background: C.paper,
-            color: C.ink,
-            fontFamily: ar ? FONT_AR : FONT_ZH,
-            fontWeight: "700",
-            textAlign: "center",
-          });
-        }
-      } catch {
-        previewWindow = null;
-      }
-    }
-
     setPdfBusy(true);
     setPdfError("");
     try {
-      const blob = await createVoucherPdf(element);
+      const { blob, previewImages } = await createVoucherPdf(element);
       const filename = `${v.no}-food-purchase.pdf`;
       const file = new File([blob], filename, { type: "application/pdf" });
-      const nextPdfState = { file, filename, url: URL.createObjectURL(blob) };
+      const nextPdfState = { file, filename, url: URL.createObjectURL(blob), previewImages };
       setPdfState(nextPdfState);
-
-      if (isWechat) {
-        if (previewWindow && !previewWindow.closed) {
-          previewWindow.location.replace(nextPdfState.url);
-        } else {
-          window.location.assign(nextPdfState.url);
-        }
-      }
     } catch (error) {
-      if (previewWindow && !previewWindow.closed) previewWindow.close();
       console.error(error);
       setPdfError(t("shareFailed"));
     } finally {
@@ -848,7 +816,7 @@ function VoucherView({ ar, t, v, catalog, onBack }) {
           >
             {pdfBusy ? <Loader2 size={18} className="animate-spin" /> : <Share size={18} />}
             <span className="text-sm">
-              {pdfBusy ? (isWechat ? t("openingPdf") : t("creatingPdf")) : (isWechat ? t("openPdfNow") : t("sharePdf"))}
+              {pdfBusy ? t("creatingPdf") : (isWechat ? t("preparePdf") : t("sharePdf"))}
             </span>
           </button>
           <button
@@ -946,8 +914,8 @@ function VoucherView({ ar, t, v, catalog, onBack }) {
             role="dialog"
             aria-modal="true"
             aria-label={t("pdfReady")}
-            className="w-full max-w-md rounded-3xl p-5 shadow-2xl"
-            style={{ background: C.paper }}
+            className="w-full max-w-md rounded-3xl p-5 shadow-2xl overflow-y-auto"
+            style={{ background: C.paper, maxHeight: "calc(100vh - 24px)" }}
           >
             <div className="flex items-center justify-between gap-4 mb-3">
               <div>
@@ -965,15 +933,33 @@ function VoucherView({ ar, t, v, catalog, onBack }) {
 
             {pdfState && (
               <div className="grid gap-2">
+                {pdfState.previewImages?.length > 0 && (
+                  <div className="rounded-2xl p-2 mb-2 grid gap-2" style={{ background: C.card, border: `1px solid ${C.line}` }}>
+                    <div className="text-sm font-bold px-1" style={{ color: C.ink }}>{t("pdfPreview")}</div>
+                    {pdfState.previewImages.map((src, index) => (
+                      // The preview is a client-generated data URL, so Next Image optimization does not apply.
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        key={index}
+                        src={src}
+                        alt={`${t("pdfPreview")} ${index + 1}`}
+                        className="w-full rounded-xl"
+                        style={{ border: `1px solid ${C.line}`, background: "#fff" }}
+                      />
+                    ))}
+                  </div>
+                )}
                 {canShareFile && (
                   <button onClick={sharePreparedPdf} className="tap w-full rounded-2xl py-4 px-4 font-bold text-lg" style={{ background: C.olive, color: "#fff" }}>
                     {t("shareFile")}
                   </button>
                 )}
-                <button onClick={openPreparedPdf} className="tap w-full rounded-2xl py-4 px-4 font-bold" style={{ background: C.ink, color: "#fff" }}>
-                  {t("openPdf")}
-                </button>
-                <a href={pdfState.url} download={pdfState.filename} className="tap w-full rounded-2xl py-3 px-4 font-bold text-center" style={{ background: C.card, color: C.ink, border: `1px solid ${C.line}` }}>
+                {!isWechat && (
+                  <button onClick={openPreparedPdf} className="tap w-full rounded-2xl py-4 px-4 font-bold" style={{ background: C.ink, color: "#fff" }}>
+                    {t("openPdf")}
+                  </button>
+                )}
+                <a href={pdfState.url} download={pdfState.filename} className="tap w-full rounded-2xl py-4 px-4 font-bold text-center" style={{ background: isWechat ? C.ink : C.card, color: isWechat ? "#fff" : C.ink, border: `1px solid ${isWechat ? C.ink : C.line}` }}>
                   {t("downloadPdf")}
                 </a>
               </div>
