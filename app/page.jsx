@@ -40,6 +40,7 @@ const FONT_NUM = "'DIN Alternate','Roboto Mono',ui-monospace,monospace";
 
 const STORE = "jc_food_voucher_v3";
 const TRANSLATION_API = "https://api.mymemory.translated.net/get";
+const PUBLIC_APP_URL = "https://bgylouis-sys.github.io/food-voucher-app/";
 
 const hasArabic = (value) => /[\u0600-\u06ff]/.test(value);
 const hasChinese = (value) => /[\u3400-\u9fff]/.test(value);
@@ -93,11 +94,12 @@ const TX = {
   pdfPreview: { ar: "معاينة محتوى PDF", zh: "PDF 内容预览" },
   shareFile: { ar: "مشاركة الملف", zh: "分享到微信/其他应用" },
   openPdf: { ar: "فتح PDF", zh: "打开 PDF 预览" },
+  openBrowserDownload: { ar: "فتح صفحة التنزيل في المتصفح", zh: "在浏览器打开下载页" },
   downloadPdf: { ar: "تنزيل PDF", zh: "下载 PDF" },
   close: { ar: "إغلاق", zh: "关闭" },
   shareFailed: { ar: "تعذر إنشاء ملف PDF، حاول مرة أخرى", zh: "PDF 生成失败，请重试" },
   shareFallback: { ar: "إذا لم يظهر خيار المشاركة، افتح الملف أو نزّله أولاً.", zh: "如果系统没有显示文件分享，请先打开或下载 PDF。" },
-  wechatHelp: { ar: "لا يدعم WeChat فتح ملف PDF الذي ينشئه الموقع مباشرة. راجع المعاينة أدناه ثم نزّل الملف؛ وبعد التنزيل افتحه أو أرسله من مدير الملفات.", zh: "微信不支持直接打开网页生成的 PDF。请先查看下方预览，再下载 PDF；下载完成后可从文件管理中打开或发送。" },
+  wechatHelp: { ar: "لا يستطيع المتصفح الخارجي فتح رابط PDF المؤقت من WeChat. افتح صفحة التنزيل الآمنة أدناه، ثم استخدم قائمة ⋯ لفتحها في متصفح الهاتف وإنشاء الملف من جديد.", zh: "微信的临时 PDF 地址无法交给外部浏览器。请点击下方的下载页链接，再从右上角“…”选择手机浏览器打开并重新生成 PDF。" },
 };
 
 const UNITS = [
@@ -157,6 +159,43 @@ const money = (n) => (Number(n) || 0).toFixed(3);
 const today = () => new Date().toISOString().slice(0, 10);
 const unitOf = (id) => UNITS.find((u) => u.id === id) || UNITS[0];
 
+const encodeVoucherHandoff = (payload) => {
+  const bytes = new TextEncoder().encode(JSON.stringify(payload));
+  let binary = "";
+  bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+};
+
+const readVoucherHandoff = () => {
+  if (typeof window === "undefined" || !window.location.hash.startsWith("#voucher=")) return null;
+  try {
+    let encoded = window.location.hash.slice("#voucher=".length).replace(/-/g, "+").replace(/_/g, "/");
+    encoded += "=".repeat((4 - (encoded.length % 4)) % 4);
+    const binary = atob(encoded);
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    const payload = JSON.parse(new TextDecoder().decode(bytes));
+    if (payload?.version !== 1 || !payload?.voucher?.no || !Array.isArray(payload?.voucher?.lines) || !Array.isArray(payload?.catalog)) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+};
+
+const createVoucherHandoffUrl = (voucher, catalog, lang, baseUrl) => {
+  if (typeof window === "undefined") return "#";
+  const itemIds = new Set(voucher.lines.map((line) => line.itemId));
+  const payload = {
+    version: 1,
+    lang,
+    voucher,
+    catalog: catalog.filter((item) => itemIds.has(item.id)),
+  };
+  const url = new URL(baseUrl || window.location.href);
+  url.search = "";
+  url.hash = `voucher=${encodeVoucherHandoff(payload)}`;
+  return url.toString();
+};
+
 export default function FoodVoucherApp() {
   const [data, setData] = useState(DEFAULT_DATA);
   const [loaded, setLoaded] = useState(false);
@@ -164,6 +203,7 @@ export default function FoodVoucherApp() {
   const [screen, setScreen] = useState("home");
   const [draft, setDraft] = useState(null);
   const [viewing, setViewing] = useState(null);
+  const [handoff, setHandoff] = useState(null);
 
   const ar = lang === "ar";
   const t = (k) => TX[k][lang];
@@ -179,6 +219,13 @@ export default function FoodVoucherApp() {
         }
       } catch (e) {
         /* 首次使用 */
+      }
+      const transferredVoucher = readVoucherHandoff();
+      if (transferredVoucher) {
+        setHandoff(transferredVoucher);
+        setLang(transferredVoucher.lang === "zh" ? "zh" : "ar");
+        setViewing(transferredVoucher.voucher);
+        setScreen("voucher");
       }
       setLoaded(true);
     })();
@@ -202,7 +249,21 @@ export default function FoodVoucherApp() {
     }
   };
 
-  const catalog = useMemo(() => [...PRESET, ...data.custom], [data.custom]);
+  const catalog = useMemo(() => {
+    const merged = [...PRESET, ...data.custom];
+    handoff?.catalog?.forEach((item) => {
+      if (!merged.some((existing) => existing.id === item.id)) merged.push(item);
+    });
+    return merged;
+  }, [data.custom, handoff]);
+
+  const leaveVoucher = () => {
+    if (handoff && typeof window !== "undefined") {
+      window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+      setHandoff(null);
+    }
+    setScreen("home");
+  };
 
   const nextNo = () => {
     const ym = today().slice(0, 7).replace("-", "");
@@ -256,7 +317,7 @@ export default function FoodVoucherApp() {
           onDone={() => finish(draft)}
         />
       )}
-      {screen === "voucher" && viewing && <VoucherView {...ctx} v={viewing} catalog={catalog} onBack={() => setScreen("home")} />}
+      {screen === "voucher" && viewing && <VoucherView {...ctx} v={viewing} catalog={catalog} onBack={leaveVoucher} />}
     </div>
   );
 }
@@ -732,13 +793,14 @@ async function createVoucherPdf(element) {
   }
 }
 
-function VoucherView({ ar, t, v, catalog, onBack }) {
+function VoucherView({ lang, ar, t, v, catalog, onBack }) {
   const itemById = (id) => catalog.find((c) => c.id === id) || { ar: "?", zh: "?", u: "kg" };
   const rows = v.lines.map((l) => ({ ...itemById(l.itemId), qty: l.qty, price: l.price, unit: l.unit || itemById(l.itemId).u }));
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pdfState, setPdfState] = useState(null);
   const [pdfError, setPdfError] = useState("");
   const isWechat = typeof navigator !== "undefined" && /MicroMessenger/i.test(navigator.userAgent);
+  const browserHandoffUrl = createVoucherHandoffUrl(v, catalog, lang, isWechat ? PUBLIC_APP_URL : null);
 
   useEffect(() => {
     return () => {
@@ -959,9 +1021,15 @@ function VoucherView({ ar, t, v, catalog, onBack }) {
                     {t("openPdf")}
                   </button>
                 )}
-                <a href={pdfState.url} download={pdfState.filename} className="tap w-full rounded-2xl py-4 px-4 font-bold text-center" style={{ background: isWechat ? C.ink : C.card, color: isWechat ? "#fff" : C.ink, border: `1px solid ${isWechat ? C.ink : C.line}` }}>
-                  {t("downloadPdf")}
-                </a>
+                {isWechat ? (
+                  <a href={browserHandoffUrl} target="_blank" rel="noreferrer" className="tap w-full rounded-2xl py-4 px-4 font-bold text-center" style={{ background: C.ink, color: "#fff", border: `1px solid ${C.ink}` }}>
+                    {t("openBrowserDownload")}
+                  </a>
+                ) : (
+                  <a href={pdfState.url} download={pdfState.filename} className="tap w-full rounded-2xl py-4 px-4 font-bold text-center" style={{ background: C.card, color: C.ink, border: `1px solid ${C.line}` }}>
+                    {t("downloadPdf")}
+                  </a>
+                )}
               </div>
             )}
           </div>
