@@ -898,14 +898,14 @@ function VoucherView({ lang, ar, t, v, catalog, onBack }) {
           <div className="text-2xl font-bold" style={{ color: C.ink2 }}>JIN CHENG GLOBAL CERAMIC CO. LTD.</div>
           <div className="text-xs mt-1" style={{ color: "#666" }}>约旦金城环球陶瓷有限公司 | شركة جين تشنغ جلوبال للسيراميك</div>
           <div className="mt-2 py-2 text-white font-bold" style={{ background: C.ink2 }}>
-            采购食物清单 &nbsp; FOOD PURCHASE LIST &nbsp; قائمة مشتريات المواد الغذائية
+            采购食物发票 &nbsp; FOOD PURCHASE INVOICE &nbsp; فاتورة شراء المواد الغذائية
           </div>
         </div>
 
         <table className="w-full mt-3" style={{ borderCollapse: "collapse" }}>
           <tbody>
             <tr>
-              <Td b>单据编号 Voucher No.</Td>
+              <Td b>发票编号 Invoice No.</Td>
               <Td mono>{v.no}</Td>
               <Td b>日期 Date</Td>
               <Td mono>{v.date}</Td>
